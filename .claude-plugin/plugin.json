@@ -1,0 +1,9 @@
+{
+  "name": "codelore",
+  "description": "Shared coding-agent rules and the Simplified Technical English skill",
+  "version": "0.1.0",
+  "author": {
+    "name": "Anwai Archit"
+  },
+  "repository": "https://github.com/anwai98/codelore"
+}

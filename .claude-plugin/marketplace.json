@@ -1,0 +1,14 @@
+{
+  "name": "codelore",
+  "description": "Anwai's shared rules and skills for coding agents",
+  "owner": {
+    "name": "Anwai Archit"
+  },
+  "plugins": [
+    {
+      "name": "codelore",
+      "source": "./",
+      "description": "Shared coding-agent rules and the Simplified Technical English skill"
+    }
+  ]
+}
