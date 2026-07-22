@@ -18,8 +18,13 @@ report() {
 }
 
 decision_for() {
-    local command=$1 input output
-    input=$(jq -n --arg c "$command" '{tool_name: "Bash", tool_input: {command: $c}}')
+    local command=$1 agent=${2:-claude} input output
+    if [ "$agent" = "codex" ]; then
+        input=$(jq -n --arg c "$command" \
+            '{model: "gpt-5.6-codex", tool_name: "Bash", tool_input: {command: $c}}')
+    else
+        input=$(jq -n --arg c "$command" '{tool_name: "Bash", tool_input: {command: $c}}')
+    fi
     output=$(printf '%s' "$input" | "$ROOT/hooks/enforce-rules.sh")
     if [ -z "$output" ]; then
         echo "allow"
@@ -29,12 +34,12 @@ decision_for() {
 }
 
 expect_decision() {
-    local command=$1 expected=$2 actual
-    actual=$(decision_for "$command")
+    local command=$1 expected=$2 agent=${3:-claude} actual
+    actual=$(decision_for "$command" "$agent")
     if [ "$actual" = "$expected" ]; then
-        report pass "[$expected] $command"
+        report pass "[$agent $expected] $command"
     else
-        report fail "[$expected] $command" "got '$actual'"
+        report fail "[$agent $expected] $command" "got '$actual'"
     fi
 }
 
@@ -109,6 +114,15 @@ test_escalated_git() {
     expect_decision "git --git-dir /a/.git push" ask
 }
 
+test_codex_defers_git_to_native_approval() {
+    expect_decision "git commit -m 'x'" allow codex
+    expect_decision "git push origin main" allow codex
+    expect_decision "micromamba run -n super git push origin main" allow codex
+    expect_decision "bash -c 'git commit -m x'" allow codex
+    expect_decision "pip install torch" deny codex
+    expect_decision "git commit -m x && pip install torch" deny codex
+}
+
 test_preview_flags_only_count_as_options() {
     expect_decision "git commit -m --help" ask
     expect_decision "git commit -m --dry-run" ask
@@ -119,6 +133,9 @@ test_preview_flags_only_count_as_options() {
     expect_decision "git push --repo --dry-run" ask
     expect_decision "git commit -m 'add a --dry-run flag'" ask
     expect_decision "pip install -r --help" deny
+    expect_decision "python -m pip install -r --help" deny
+    expect_decision "micromamba run -n super pip install -r --help" deny
+    expect_decision "micromamba run -n super git commit -m --help" ask
     expect_decision "conda install -n --help numpy" deny
     expect_decision "git commit --help" allow
     expect_decision "git commit --help -m x" allow
@@ -126,6 +143,43 @@ test_preview_flags_only_count_as_options() {
     expect_decision "git push origin main --dry-run" allow
     expect_decision "pip install --help" allow
     expect_decision "pip install torch --dry-run" allow
+    expect_decision "python -m pip install --help" allow
+    expect_decision "python --help -m pip install torch" allow
+    expect_decision "python -W --help -m pip install torch" deny
+    expect_decision "micromamba run -n super git commit --help" allow
+    expect_decision "micromamba --help run -n super pip install torch" allow
+    expect_decision "micromamba run --help pip install torch" allow
+    expect_decision "micromamba run -n --help pip install torch" deny
+    expect_decision "uv add --help" allow
+    expect_decision "uv --help run pip install torch" allow
+    expect_decision "uv run --help pip install torch" allow
+}
+
+test_command_prefixes_are_inspected() {
+    expect_decision "X=1 pip install torch" deny
+    expect_decision "_X=1 pip install torch" deny
+    expect_decision "env X=1 pip install torch" deny
+    expect_decision "env _X=1 pip install torch" deny
+    expect_decision "2>/dev/null pip install torch" deny
+    expect_decision ">/dev/null pip install torch" deny
+    expect_decision "2> /dev/null pip install torch" deny
+    expect_decision "2>&1 pip install torch" deny
+    expect_decision "&>/dev/null pip install torch" deny
+    expect_decision "2>/dev/null git commit -m x" ask
+    expect_decision "X=1 git push origin main" ask
+    expect_decision "2> pip install torch" allow
+}
+
+test_heredoc_bodies_are_not_commands() {
+    expect_decision $'cat <<\'EOF\' > notes\npip install torch\nEOF' allow
+    expect_decision $'cat <<EOF > notes\ngit commit -m x\nEOF' allow
+    expect_decision $'cat <<-EOF > notes\n\tpip install torch\n\tEOF' allow
+    expect_decision $'cat <<A <<\'B\'\npip install one\nA\ngit push origin main\nB' allow
+    expect_decision $'cat <<EOF\npip install body\nEOF\npip install actual' deny
+    expect_decision $'cat <<EOF && pip install actual\nnotes\nEOF' deny
+    expect_decision "printf '%s' 'cat <<EOF'" allow
+    expect_decision "cat <<< 'pip install torch'" allow
+    expect_decision $'cat <<< notes\npip install actual' deny
 }
 
 test_compound_commands_cannot_hide_a_violation() {
@@ -162,7 +216,7 @@ test_shell_invoker_is_inspected() {
 
 # A stub PATH that holds every tool of the hook except jq, so the python3 branch runs.
 test_enforcement_survives_without_jq() {
-    local stub binary decision
+    local stub binary decision output
 
     if [ -z "$(type -P python3)" ]; then
         report pass "enforcement without jq (skipped: no python3)"
@@ -177,13 +231,22 @@ test_enforcement_survives_without_jq() {
     decision=$(jq -n '{tool_name: "Bash", tool_input: {command: "pip install torch"}}' \
         | env -i PATH="$stub" "$stub/bash" "$ROOT/hooks/enforce-rules.sh" \
         | jq -r '.hookSpecificOutput.permissionDecision // empty')
-    rm -rf "$stub"
 
     if [ "$decision" = "deny" ]; then
         report pass "enforcement still denies when jq is absent"
     else
         report fail "enforcement still denies when jq is absent" "got '$decision'"
     fi
+
+    output=$(jq -n '{model: "gpt-5.6-codex", tool_name: "Bash", tool_input: {command: "git commit -m x"}}' \
+        | env -i PATH="$stub" "$stub/bash" "$ROOT/hooks/enforce-rules.sh")
+    if [ -z "$output" ]; then
+        report pass "Codex Git approval still defers when jq is absent"
+    else
+        report fail "Codex Git approval still defers when jq is absent" "got '$output'"
+    fi
+
+    rm -rf "$stub"
 }
 
 test_allowed() {
@@ -400,7 +463,10 @@ main() {
     test_every_install_verb_is_denied
     test_bare_executables_are_handled
     test_escalated_git
+    test_codex_defers_git_to_native_approval
     test_preview_flags_only_count_as_options
+    test_command_prefixes_are_inspected
+    test_heredoc_bodies_are_not_commands
     test_compound_commands_cannot_hide_a_violation
     test_runner_commands_are_inspected
     test_shell_invoker_is_inspected

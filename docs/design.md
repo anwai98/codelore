@@ -66,11 +66,16 @@ Two things reduce the risk:
 
 1. `AGENTS.md` starts with a statement that the rules govern. This makes the intended precedence
    explicit, but it is still an instruction and not a mechanical guarantee.
-2. `hooks/enforce-rules.sh` is a `PreToolUse` hook. It returns `deny` or `ask`. This is a real
-   block in both agents after the user enables and trusts the plugin hook.
+2. `hooks/enforce-rules.sh` is a `PreToolUse` hook. It returns `deny` for forbidden installs in
+   both agents. For a commit or a push, it returns `ask` in Claude Code. Codex does not support
+   `ask` from this hook, so the hook leaves Git approval to Codex's native sandbox and approval
+   flow.
 
-The hook blocks the installation of packages, and it escalates a commit and a push to the user. It
-blocks every install verb it knows, not only `install`: `pip install`, `python -m pip install`,
+The hook blocks the installation of packages in both agents. It escalates a commit and a push to
+the user in Claude Code. In Codex, the native sandbox protects `.git` and network access, so these
+commands enter the normal approval flow. Bypassing the Codex sandbox also bypasses this approval;
+the rule in `AGENTS.md` remains an instruction in that mode. The hook blocks every install verb it
+knows, not only `install`: `pip install`, `python -m pip install`,
 `uv add`, `uv sync`, `uv pip install`, `uv tool install`, and the `conda` and `micromamba` verbs
 `install`, `create`, `update`, `upgrade`, and `env create`/`env update`. It reads `python -m pip`
 in the attached form `-mpip` and inside a bundle of short options such as `-um pip`. Rules that the
@@ -78,12 +83,14 @@ hook does not cover remain instructions. A conflicting repository rule can still
 less certain.
 
 The hook reads the text of the command, so it has limits. It tokenizes simple shell commands,
-respects quoted text, checks each part of a compound command, and inspects commands inside shell
-invokers such as `bash -lc "..."` and inside runners such as `micromamba run -n super ...`. It
-lists the options that take a value for each runner, so it can find the nested command. An unknown
-option that takes a value shifts this position and hides the nested command. A `--help` or a
-`--dry-run` counts only in an option position, so `git commit -m --help` stays a real commit. It
-cannot see a command that is built at run time, as in
+respects quoted text, ignores heredoc bodies, checks each part of a compound command, and skips
+assignment and redirection prefixes before finding the executable. It inspects commands inside
+shell invokers such as `bash -lc "..."` and inside runners such as
+`micromamba run -n super ...`. It lists the options that take a value for each runner, so it can
+find the nested command. An unknown option that takes a value shifts this position and hides the
+nested command. Preview flags are checked after resolving a nested command. A `--help` or a
+`--dry-run` counts only in an option position, so `git commit -m --help` stays a real commit. The
+hook cannot see a command that is built at run time, as in
 `P=pip; $P install x`. It also does not parse command substitutions or commands hidden behind other
 programs. Treat the hook as a guard against a violation by mistake, not as a security boundary.
 

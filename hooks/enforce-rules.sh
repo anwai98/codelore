@@ -4,12 +4,18 @@ set -uo pipefail
 
 TOKEN_TYPES=()
 TOKEN_VALUES=()
+HEREDOC_DELIMITERS=()
+HEREDOC_STRIP_TABS=()
 DECISION=allow
 REASON=
+IS_CODEX=0
+STRIPPED_COMMAND=
+REDIRECTION_WIDTH=0
 SUBCOMMAND=
 SUBCOMMAND_INDEX=-1
 PYTHON_MODULE=
 PYTHON_MODULE_INDEX=-1
+PYTHON_SAFE_PREVIEW=0
 
 PIP_REASON="The environment is managed by the user. Do not install packages with pip."
 CONDA_REASON="The environment is managed by the user. Do not install packages with conda or micromamba."
@@ -56,14 +62,177 @@ append_token() {
     TOKEN_VALUES+=("$2")
 }
 
+collect_heredocs() {
+    local line=$1 length i j char next state delimiter strip_tabs boundary
+    length=${#line}
+    state=plain
+    boundary=1
+
+    for ((i = 0; i < length; i++)); do
+        char=${line:i:1}
+        if [ "$state" = "single" ]; then
+            [ "$char" = "'" ] && state=plain
+            continue
+        fi
+        if [ "$state" = "double" ]; then
+            if [ "$char" = '"' ]; then
+                state=plain
+            elif [ "$char" = "\\" ]; then
+                i=$((i + 1))
+            fi
+            continue
+        fi
+
+        case "$char" in
+            "'")
+                state=single
+                boundary=0
+                ;;
+            '"')
+                state=double
+                boundary=0
+                ;;
+            "\\")
+                boundary=0
+                i=$((i + 1))
+                ;;
+            '#')
+                [ "$boundary" -eq 1 ] && return
+                boundary=0
+                ;;
+            ' '|$'\t')
+                boundary=1
+                ;;
+            ';'|'|'|'&'|'('|')')
+                boundary=1
+                ;;
+            '<')
+                next=
+                [ $((i + 1)) -lt "$length" ] && next=${line:i+1:1}
+                if { [ "$i" -gt 0 ] && [ "${line:i-1:1}" = "<" ]; } || [ "$next" != "<" ] || \
+                    { [ $((i + 2)) -lt "$length" ] && [ "${line:i+2:1}" = "<" ]; }; then
+                    boundary=1
+                    continue
+                fi
+
+                j=$((i + 2))
+                strip_tabs=0
+                if [ "$j" -lt "$length" ] && [ "${line:j:1}" = "-" ]; then
+                    strip_tabs=1
+                    j=$((j + 1))
+                fi
+                while [ "$j" -lt "$length" ] && [[ "${line:j:1}" = ' ' || "${line:j:1}" = $'\t' ]]; do
+                    j=$((j + 1))
+                done
+
+                delimiter=
+                state=plain
+                while [ "$j" -lt "$length" ]; do
+                    char=${line:j:1}
+                    if [ "$state" = "single" ]; then
+                        if [ "$char" = "'" ]; then
+                            state=plain
+                        else
+                            delimiter+=$char
+                        fi
+                    elif [ "$state" = "double" ]; then
+                        if [ "$char" = '"' ]; then
+                            state=plain
+                        elif [ "$char" = "\\" ] && [ $((j + 1)) -lt "$length" ]; then
+                            j=$((j + 1))
+                            delimiter+=${line:j:1}
+                        else
+                            delimiter+=$char
+                        fi
+                    else
+                        case "$char" in
+                            "'")
+                                state=single
+                                ;;
+                            '"')
+                                state=double
+                                ;;
+                            "\\")
+                                if [ $((j + 1)) -lt "$length" ]; then
+                                    j=$((j + 1))
+                                    delimiter+=${line:j:1}
+                                fi
+                                ;;
+                            ' '|$'\t'|';'|'|'|'&'|'('|')'|'<'|'>')
+                                break
+                                ;;
+                            *)
+                                delimiter+=$char
+                                ;;
+                        esac
+                    fi
+                    j=$((j + 1))
+                done
+                if [ -n "$delimiter" ]; then
+                    HEREDOC_DELIMITERS+=("$delimiter")
+                    HEREDOC_STRIP_TABS+=("$strip_tabs")
+                fi
+                state=plain
+                boundary=1
+                i=$((j - 1))
+                ;;
+            *)
+                boundary=0
+                ;;
+        esac
+    done
+}
+
+strip_heredoc_bodies() {
+    local remaining=$1 line has_newline compare delimiter strip_tabs
+    STRIPPED_COMMAND=
+    HEREDOC_DELIMITERS=()
+    HEREDOC_STRIP_TABS=()
+
+    while :; do
+        if [[ "$remaining" = *$'\n'* ]]; then
+            line=${remaining%%$'\n'*}
+            remaining=${remaining#*$'\n'}
+            has_newline=1
+        else
+            line=$remaining
+            remaining=
+            has_newline=0
+        fi
+
+        if [ "${#HEREDOC_DELIMITERS[@]}" -gt 0 ]; then
+            delimiter=${HEREDOC_DELIMITERS[0]}
+            strip_tabs=${HEREDOC_STRIP_TABS[0]}
+            compare=$line
+            if [ "$strip_tabs" -eq 1 ]; then
+                while [[ "$compare" = $'\t'* ]]; do
+                    compare=${compare#$'\t'}
+                done
+            fi
+            if [ "$compare" = "$delimiter" ]; then
+                HEREDOC_DELIMITERS=("${HEREDOC_DELIMITERS[@]:1}")
+                HEREDOC_STRIP_TABS=("${HEREDOC_STRIP_TABS[@]:1}")
+            fi
+        else
+            STRIPPED_COMMAND+=$line
+            collect_heredocs "$line"
+            [ "$has_newline" -eq 0 ] || STRIPPED_COMMAND+=$'\n'
+        fi
+
+        [ "$has_newline" -eq 1 ] || break
+    done
+}
+
 tokenize() {
-    local input=$1 length i char next state token have_token
+    local input=$1 length i char next state token have_token output_redirection fd_redirection
     TOKEN_TYPES=()
     TOKEN_VALUES=()
     length=${#input}
     state=plain
     token=
     have_token=0
+    output_redirection='^[0-9]*>$'
+    fd_redirection='^[0-9]*[<>]$'
 
     for ((i = 0; i < length; i++)); do
         char=${input:i:1}
@@ -118,7 +287,12 @@ tokenize() {
                 fi
                 append_token separator "$char"
                 ;;
-            '|'|'&')
+            '|')
+                if [[ "$token" =~ $output_redirection ]]; then
+                    token+=$char
+                    have_token=1
+                    continue
+                fi
                 if [ "$have_token" -eq 1 ]; then
                     append_token word "$token"
                     token=
@@ -127,6 +301,26 @@ tokenize() {
                 next=
                 if [ $((i + 1)) -lt "$length" ]; then
                     next=${input:i+1:1}
+                fi
+                if [ "$next" = "$char" ]; then
+                    append_token separator "$char$next"
+                    i=$((i + 1))
+                else
+                    append_token separator "$char"
+                fi
+                ;;
+            '&')
+                next=
+                [ $((i + 1)) -lt "$length" ] && next=${input:i+1:1}
+                if [[ "$token" =~ $fd_redirection ]] || { [ -z "$token" ] && [ "$next" = ">" ]; }; then
+                    token+=$char
+                    have_token=1
+                    continue
+                fi
+                if [ "$have_token" -eq 1 ]; then
+                    append_token word "$token"
+                    token=
+                    have_token=0
                 fi
                 if [ "$next" = "$char" ]; then
                     append_token separator "$char$next"
@@ -145,6 +339,21 @@ tokenize() {
     if [ "$have_token" -eq 1 ]; then
         append_token word "$token"
     fi
+}
+
+is_assignment() {
+    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*(\+)?= ]]
+}
+
+is_redirection() {
+    local pattern='^[0-9]*(&>>|&>|<<<|<<-?|>>|<>|>\||>&|<&|>|<)(.*)$'
+    REDIRECTION_WIDTH=0
+    if [[ "$1" =~ $pattern ]]; then
+        REDIRECTION_WIDTH=1
+        [ -n "${BASH_REMATCH[2]}" ] || REDIRECTION_WIDTH=2
+        return 0
+    fi
+    return 1
 }
 
 # A preview flag counts only when it sits in an option position. In `git commit -m --help` the
@@ -183,10 +392,15 @@ find_python_module() {
     count=${#args[@]}
     PYTHON_MODULE=
     PYTHON_MODULE_INDEX=-1
+    PYTHON_SAFE_PREVIEW=0
 
     for ((i = 0; i < count; i++)); do
         word=${args[$i]}
         [[ "$word" = -?* ]] || return
+        if [[ "$word" = --help || "$word" = --dry-run ]]; then
+            PYTHON_SAFE_PREVIEW=1
+            return
+        fi
         [[ "$word" = --* ]] && continue
         length=${#word}
         for ((j = 1; j < length; j++)); do
@@ -216,11 +430,14 @@ find_python_module() {
 }
 
 inspect_python() {
+    local pip_args
     find_python_module "$@"
+    [ "$PYTHON_SAFE_PREVIEW" -eq 0 ] || return
     [ "$PYTHON_MODULE" = "pip" ] || return
     [ "$PYTHON_MODULE_INDEX" -lt "$#" ] || return
-    find_subcommand pip "${@:$((PYTHON_MODULE_INDEX + 1))}"
-    if [ "$SUBCOMMAND" = "install" ]; then
+    pip_args=("${@:$((PYTHON_MODULE_INDEX + 1))}")
+    find_subcommand pip "${pip_args[@]}"
+    if ! is_safe_preview pip "${pip_args[@]}" && [ "$SUBCOMMAND" = "install" ]; then
         set_decision deny "$PIP_REASON"
     fi
 }
@@ -279,6 +496,24 @@ option_takes_value() {
         conda-install:--channel|conda-install:--file)
             return 0
             ;;
+        conda-create:-n|conda-create:--name|conda-create:-p|conda-create:--prefix|conda-create:-c)
+            return 0
+            ;;
+        conda-create:--channel|conda-create:--file|conda-create:-f)
+            return 0
+            ;;
+        conda-update:-n|conda-update:--name|conda-update:-p|conda-update:--prefix|conda-update:-c)
+            return 0
+            ;;
+        conda-update:--channel|conda-update:--file)
+            return 0
+            ;;
+        conda-upgrade:-n|conda-upgrade:--name|conda-upgrade:-p|conda-upgrade:--prefix|conda-upgrade:-c)
+            return 0
+            ;;
+        conda-upgrade:--channel|conda-upgrade:--file)
+            return 0
+            ;;
     esac
     return 1
 }
@@ -314,25 +549,36 @@ find_subcommand() {
 # Inspect the command that a runner executes, as in `micromamba run -n super pip install x`.
 # The arguments are the words after the `run` subcommand.
 inspect_runner() {
-    local kind=$1 index
+    local kind=$1 args prefix index
     shift
     [ "$#" -gt 0 ] || return
-    find_subcommand "$kind" "$@"
+    args=("$@")
+    find_subcommand "$kind" "${args[@]}"
     index=$SUBCOMMAND_INDEX
     [ "$index" -ge 0 ] || return
-    inspect_simple_command "${@:$((index + 1))}"
+    if [ "$index" -gt 0 ]; then
+        prefix=("${args[@]:0:$index}")
+        is_safe_preview "$kind" "${prefix[@]}" && return
+    fi
+    inspect_simple_command "${args[@]:$index}"
 }
 
 # The uv subcommands that change the environment of the user.
 inspect_uv() {
-    local args=("$@") count index
+    local args=("$@") nested count index
     count=${#args[@]}
     find_subcommand uv "${args[@]}"
     index=$SUBCOMMAND_INDEX
+    if [ "$index" -gt 0 ]; then
+        nested=("${args[@]:0:$index}")
+        is_safe_preview uv "${nested[@]}" && return
+    fi
 
     case "$SUBCOMMAND" in
         add|sync)
-            set_decision deny "$UV_REASON"
+            if ! is_safe_preview uv "${args[@]}"; then
+                set_decision deny "$UV_REASON"
+            fi
             return
             ;;
     esac
@@ -341,16 +587,20 @@ inspect_uv() {
 
     case "$SUBCOMMAND" in
         pip)
-            find_subcommand pip "${args[@]:$((index + 1))}"
-            case "$SUBCOMMAND" in
-                install|sync)
-                    set_decision deny "$PIP_REASON"
-                    ;;
-            esac
+            nested=("${args[@]:$((index + 1))}")
+            find_subcommand pip "${nested[@]}"
+            if ! is_safe_preview pip "${nested[@]}"; then
+                case "$SUBCOMMAND" in
+                    install|sync)
+                        set_decision deny "$PIP_REASON"
+                        ;;
+                esac
+            fi
             ;;
         tool)
-            find_subcommand uv "${args[@]:$((index + 1))}"
-            if [ "$SUBCOMMAND" = "install" ]; then
+            nested=("${args[@]:$((index + 1))}")
+            find_subcommand uv "${nested[@]}"
+            if ! is_safe_preview uv "${nested[@]}" && [ "$SUBCOMMAND" = "install" ]; then
                 set_decision deny "$UV_REASON"
             fi
             ;;
@@ -362,14 +612,20 @@ inspect_uv() {
 
 # The conda and micromamba subcommands that change the environment of the user.
 inspect_conda() {
-    local args=("$@") count index
+    local args=("$@") nested count index
     count=${#args[@]}
     find_subcommand conda "${args[@]}"
     index=$SUBCOMMAND_INDEX
+    if [ "$index" -gt 0 ]; then
+        nested=("${args[@]:0:$index}")
+        is_safe_preview conda "${nested[@]}" && return
+    fi
 
     case "$SUBCOMMAND" in
         install|create|update|upgrade)
-            set_decision deny "$CONDA_REASON"
+            if ! is_safe_preview conda "${args[@]}"; then
+                set_decision deny "$CONDA_REASON"
+            fi
             return
             ;;
     esac
@@ -378,12 +634,15 @@ inspect_conda() {
 
     case "$SUBCOMMAND" in
         env)
-            find_subcommand conda "${args[@]:$((index + 1))}"
-            case "$SUBCOMMAND" in
-                create|update)
-                    set_decision deny "$CONDA_REASON"
-                    ;;
-            esac
+            nested=("${args[@]:$((index + 1))}")
+            find_subcommand conda "${nested[@]}"
+            if ! is_safe_preview conda "${nested[@]}"; then
+                case "$SUBCOMMAND" in
+                    create|update)
+                        set_decision deny "$CONDA_REASON"
+                        ;;
+                esac
+            fi
             ;;
         run)
             inspect_runner conda "${args[@]:$((index + 1))}"
@@ -415,12 +674,14 @@ inspect_simple_command() {
     while [ "$i" -lt "$count" ]; do
         word=${words[$i]}
         executable=${word##*/}
-        case "$word" in
-            [A-Za-z_][A-Za-z0-9_]*=*)
-                i=$((i + 1))
-                continue
-                ;;
-        esac
+        if is_assignment "$word"; then
+            i=$((i + 1))
+            continue
+        fi
+        if is_redirection "$word"; then
+            i=$((i + REDIRECTION_WIDTH))
+            continue
+        fi
         case "$executable" in
             '!'|'{'|'}'|if|then|elif|else|while|until|do|done)
                 i=$((i + 1))
@@ -440,7 +701,7 @@ inspect_simple_command() {
                     if [[ "$option" = -u || "$option" = --unset || "$option" = -C || "$option" = --chdir || \
                         "$option" = -S || "$option" = --split-string ]]; then
                         i=$((i + 2))
-                    elif [[ "$option" = -* || "$option" = [A-Za-z_][A-Za-z0-9_]*=* ]]; then
+                    elif [[ "$option" = -* ]] || is_assignment "$option"; then
                         i=$((i + 1))
                     else
                         break
@@ -490,24 +751,20 @@ inspect_simple_command() {
             fi
             ;;
         python|python[0-9]|python[0-9].[0-9]*)
-            if ! is_safe_preview python "${args[@]}"; then
-                inspect_python "${args[@]}"
-            fi
+            inspect_python "${args[@]}"
             ;;
         uv)
-            if ! is_safe_preview uv "${args[@]}"; then
-                inspect_uv "${args[@]}"
-            fi
+            inspect_uv "${args[@]}"
             ;;
         micromamba|mamba|conda)
-            if ! is_safe_preview conda "${args[@]}"; then
-                inspect_conda "${args[@]}"
-            fi
+            inspect_conda "${args[@]}"
             ;;
         git)
             find_subcommand git "${args[@]}"
             if ! is_safe_preview git "${args[@]}" && [[ "$SUBCOMMAND" = commit || "$SUBCOMMAND" = push ]]; then
-                set_decision ask "The user must give explicit permission before a commit or a push."
+                if [ "$IS_CODEX" -eq 0 ]; then
+                    set_decision ask "The user must give explicit permission before a commit or a push."
+                fi
             fi
             ;;
     esac
@@ -515,7 +772,8 @@ inspect_simple_command() {
 
 inspect_command() {
     local command=$1 token_types token_values segment i
-    tokenize "$command"
+    strip_heredoc_bodies "$command"
+    tokenize "$STRIPPED_COMMAND"
     [ "${#TOKEN_TYPES[@]}" -gt 0 ] || return
     token_types=("${TOKEN_TYPES[@]}")
     token_values=("${TOKEN_VALUES[@]}")
@@ -533,10 +791,12 @@ inspect_command() {
 }
 
 main() {
-    local input tool command
+    local input tool command model
     input=$(cat)
     tool=$(json_field "$input" "tool_name")
     [ "$tool" = "Bash" ] || exit 0
+    model=$(json_field "$input" "model")
+    [ -z "$model" ] || IS_CODEX=1
 
     command=$(json_field "$input" "tool_input.command")
     [ -n "$command" ] || exit 0
