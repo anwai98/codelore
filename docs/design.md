@@ -45,7 +45,11 @@ rules as `additionalContext`, and Claude Code puts this text into the context wi
 only way for a plugin to give always-on rules.
 
 The repository root is the plugin, and the repository is also its own marketplace. Both agents set
-`${CLAUDE_PLUGIN_ROOT}` for plugin hooks, so the hook finds `AGENTS.md` at an exact path. The
+`${CLAUDE_PLUGIN_ROOT}` for plugin hooks, so the hook finds `AGENTS.md` at an exact path. Codex
+sets `PLUGIN_ROOT` and also `CLAUDE_PLUGIN_ROOT` for compatibility. `hooks/emit-rules.sh` reads
+either variable, and it falls back to its own location, because an empty variable would make it
+read `/AGENTS.md`. If it finds no rules file, it writes a warning and exits 0. The session must
+always start, but a broken install must not look the same as a working one. The
 repository holds one plugin. If it must hold more than one plugin later, each plugin moves into
 `plugins/<name>/`, and each marketplace source changes.
 
@@ -65,13 +69,21 @@ Two things reduce the risk:
 2. `hooks/enforce-rules.sh` is a `PreToolUse` hook. It returns `deny` or `ask`. This is a real
    block in both agents after the user enables and trusts the plugin hook.
 
-The hook blocks the installation of packages, and it escalates a commit and a push to the user.
-Rules that the hook does not cover remain instructions. A conflicting repository rule can still
-make their result less certain.
+The hook blocks the installation of packages, and it escalates a commit and a push to the user. It
+blocks every install verb it knows, not only `install`: `pip install`, `python -m pip install`,
+`uv add`, `uv sync`, `uv pip install`, `uv tool install`, and the `conda` and `micromamba` verbs
+`install`, `create`, `update`, `upgrade`, and `env create`/`env update`. It reads `python -m pip`
+in the attached form `-mpip` and inside a bundle of short options such as `-um pip`. Rules that the
+hook does not cover remain instructions. A conflicting repository rule can still make their result
+less certain.
 
 The hook reads the text of the command, so it has limits. It tokenizes simple shell commands,
 respects quoted text, checks each part of a compound command, and inspects commands inside shell
-invokers such as `bash -lc "..."`. It cannot see a command that is built at run time, as in
+invokers such as `bash -lc "..."` and inside runners such as `micromamba run -n super ...`. It
+lists the options that take a value for each runner, so it can find the nested command. An unknown
+option that takes a value shifts this position and hides the nested command. A `--help` or a
+`--dry-run` counts only in an option position, so `git commit -m --help` stays a real commit. It
+cannot see a command that is built at run time, as in
 `P=pip; $P install x`. It also does not parse command substitutions or commands hidden behind other
 programs. Treat the hook as a guard against a violation by mistake, not as a security boundary.
 

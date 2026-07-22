@@ -19,6 +19,12 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 
 - Always validate changes by running the actual scripts in `scripts/` with real data and real checkpoints where available. Do not use inline Python smoke tests.
 
+## Compatibility
+
+- Do not add backward compatibility when you add a feature. Write only the new form.
+- Do not keep an old name, an alias, a deprecation warning, or a fallback path for old callers. Change every call site instead.
+- Keep backward compatibility only when the user asks for it.
+
 ## Code quality
 
 - Always run `flake8 --max-line-length=120` on any code you add before considering the task done.

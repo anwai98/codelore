@@ -52,6 +52,53 @@ test_denied_installs() {
     expect_decision "micromamba -n super install numpy" deny
 }
 
+test_attached_python_module_is_inspected() {
+    expect_decision "python -mpip install torch" deny
+    expect_decision "python3 -mpip install torch" deny
+    expect_decision "python -um pip install torch" deny
+    expect_decision "python -umpip install torch" deny
+    expect_decision "python -u -m pip install -e ." deny
+    expect_decision "python -W ignore -m pip install torch" deny
+    expect_decision "python -X faulthandler -m pip install torch" deny
+    expect_decision "python -Wignore -mpip install torch" deny
+    expect_decision "python -mpip download install" allow
+    expect_decision "python -c 'import pip' -m pip install torch" allow
+    expect_decision "python train.py -m pip install torch" allow
+}
+
+test_every_install_verb_is_denied() {
+    expect_decision "uv add torch" deny
+    expect_decision "uv sync" deny
+    expect_decision "uv tool install ruff" deny
+    expect_decision "uv pip sync requirements.txt" deny
+    expect_decision "conda create -n x numpy" deny
+    expect_decision "conda env create -f env.yaml" deny
+    expect_decision "conda env update -f env.yaml" deny
+    expect_decision "micromamba create -n x numpy" deny
+    expect_decision "conda update numpy" deny
+    expect_decision "mamba upgrade -n super scipy" deny
+    expect_decision "uv lock" allow
+    expect_decision "conda env list" allow
+    expect_decision "conda list" allow
+}
+
+# A bare executable expands an empty array, which aborts bash 3.2 under `set -u`.
+test_bare_executables_are_handled() {
+    expect_decision "pip" allow
+    expect_decision "python" allow
+    expect_decision "uv" allow
+    expect_decision "conda" allow
+    expect_decision "micromamba" allow
+    expect_decision "git" allow
+    expect_decision "bash" allow
+    expect_decision "uv pip" allow
+    expect_decision "micromamba run" allow
+    expect_decision "conda env" allow
+    expect_decision "uv tool" allow
+    expect_decision "python -m" allow
+    expect_decision "   " allow
+}
+
 test_escalated_git() {
     expect_decision "git commit -m 'x'" ask
     expect_decision "git push origin main" ask
@@ -62,6 +109,25 @@ test_escalated_git() {
     expect_decision "git --git-dir /a/.git push" ask
 }
 
+test_preview_flags_only_count_as_options() {
+    expect_decision "git commit -m --help" ask
+    expect_decision "git commit -m --dry-run" ask
+    expect_decision "git commit --message --help" ask
+    expect_decision "git commit -F --help" ask
+    expect_decision "git commit -m x --author --help" ask
+    expect_decision "git -C /tmp commit -m --help" ask
+    expect_decision "git push --repo --dry-run" ask
+    expect_decision "git commit -m 'add a --dry-run flag'" ask
+    expect_decision "pip install -r --help" deny
+    expect_decision "conda install -n --help numpy" deny
+    expect_decision "git commit --help" allow
+    expect_decision "git commit --help -m x" allow
+    expect_decision "git push --dry-run origin main" allow
+    expect_decision "git push origin main --dry-run" allow
+    expect_decision "pip install --help" allow
+    expect_decision "pip install torch --dry-run" allow
+}
+
 test_compound_commands_cannot_hide_a_violation() {
     expect_decision "du -h && pip install torch" deny
     expect_decision "ls -h; pip install torch" deny
@@ -70,6 +136,20 @@ test_compound_commands_cannot_hide_a_violation() {
     expect_decision "echo done | grep -h done && conda install numpy" deny
     expect_decision "git commit -m x && pip install torch" deny
     expect_decision "git push origin main; conda install numpy" deny
+}
+
+test_runner_commands_are_inspected() {
+    expect_decision "micromamba run -n super pip install torch" deny
+    expect_decision "micromamba run -n super python -m pip install -e ." deny
+    expect_decision "conda run -n super pip install torch" deny
+    expect_decision "mamba run -p /opt/env pip install torch" deny
+    expect_decision "conda run -n super --cwd /tmp pip install torch" deny
+    expect_decision "uv run pip install torch" deny
+    expect_decision "uv run --with numpy pip install torch" deny
+    expect_decision "micromamba run -n super bash -c 'pip install torch'" deny
+    expect_decision "micromamba run -n super git push origin main" ask
+    expect_decision "micromamba run -n super python train.py" allow
+    expect_decision "micromamba run -n super flake8 --max-line-length=120 ." allow
 }
 
 test_shell_invoker_is_inspected() {
@@ -173,13 +253,42 @@ test_emission_survives_without_jq() {
     fi
 }
 
-test_rules_missing_root_is_silent() {
-    local output
-    output=$(env -u CLAUDE_PLUGIN_ROOT "$ROOT/hooks/emit-rules.sh")
-    if [ -z "$output" ]; then
-        report pass "emit-rules is silent without CLAUDE_PLUGIN_ROOT"
+# The plugin root must never come from an empty variable, or the hook reads /AGENTS.md.
+test_rules_root_falls_back_to_the_script_location() {
+    local event
+    event=$(env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT "$ROOT/hooks/emit-rules.sh" \
+        | jq -r '.hookSpecificOutput.hookEventName // empty')
+    if [ "$event" = "SessionStart" ]; then
+        report pass "emit-rules finds the rules without either plugin root variable"
     else
-        report fail "emit-rules is silent without CLAUDE_PLUGIN_ROOT" "got output"
+        report fail "emit-rules finds the rules without either plugin root variable" "got '$event'"
+    fi
+}
+
+test_rules_root_accepts_the_codex_variable() {
+    local event
+    event=$(env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$ROOT" "$ROOT/hooks/emit-rules.sh" \
+        | jq -r '.hookSpecificOutput.hookEventName // empty')
+    if [ "$event" = "SessionStart" ]; then
+        report pass "emit-rules accepts PLUGIN_ROOT, the Codex variable"
+    else
+        report fail "emit-rules accepts PLUGIN_ROOT, the Codex variable" "got '$event'"
+    fi
+}
+
+test_rules_missing_file_warns_and_exits_zero() {
+    local empty output status warning
+    empty=$(mktemp -d)
+    output=$(CLAUDE_PLUGIN_ROOT="$empty" "$ROOT/hooks/emit-rules.sh" 2>"$empty/stderr")
+    status=$?
+    warning=$(cat "$empty/stderr")
+    rm -rf "$empty"
+
+    if [ -z "$output" ] && [ "$status" -eq 0 ] && [ -n "$warning" ]; then
+        report pass "emit-rules warns and exits 0 when the rules file is absent"
+    else
+        report fail "emit-rules warns and exits 0 when the rules file is absent" \
+            "status '$status', stdout '$output', stderr '$warning'"
     fi
 }
 
@@ -287,8 +396,13 @@ main() {
     command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests."; exit 1; }
 
     test_denied_installs
+    test_attached_python_module_is_inspected
+    test_every_install_verb_is_denied
+    test_bare_executables_are_handled
     test_escalated_git
+    test_preview_flags_only_count_as_options
     test_compound_commands_cannot_hide_a_violation
+    test_runner_commands_are_inspected
     test_shell_invoker_is_inspected
     test_enforcement_survives_without_jq
     test_allowed
@@ -296,7 +410,9 @@ main() {
     test_rules_payload_is_valid_json
     test_rules_payload_matches_agents_md
     test_emission_survives_without_jq
-    test_rules_missing_root_is_silent
+    test_rules_root_falls_back_to_the_script_location
+    test_rules_root_accepts_the_codex_variable
+    test_rules_missing_file_warns_and_exits_zero
     test_every_skill_is_well_formed
     test_claude_md_only_imports_agents_md
     test_manifests_are_valid_json
