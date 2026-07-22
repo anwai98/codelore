@@ -83,8 +83,8 @@ nothing").
 
 ## Words with two meanings
 
-Give each of these one meaning per project, and write it down in the project glossary or
-in `CLAUDE.md`:
+Give each of these one meaning per project. Write it in the project glossary or in shared agent
+guidance such as `AGENTS.md`:
 
 - **mask**: the prompt, or the output? Pick one. Use `mask prompt` and `segmentation` for the other.
 - **model**: the network, or the checkpoint? Use `checkpoint` for the file.

@@ -16,34 +16,43 @@ machine, with the smallest possible setup for each machine.
 
 | File | Role |
 | :--- | :--- |
-| `AGENTS.md` | The rules. This is the single source of truth. Codex reads it directly. |
+| `AGENTS.md` | The rules. This is the single source of truth for both agents. |
 | `CLAUDE.md` | Imports `AGENTS.md` with `@AGENTS.md`, then adds the rules for work in this repository. |
 | `hooks/emit-rules.sh` | Sends `AGENTS.md` into the context of every session. |
 | `hooks/enforce-rules.sh` | Blocks the commands that must not run. |
-| `skills/` | The skills. Claude Code finds them because the repository is a plugin. |
+| `skills/` | The skills. Both agents find them through their plugins. |
+| `.claude-plugin/` | The Claude Code plugin and marketplace manifests. |
+| `.codex-plugin/` | The Codex plugin manifest. |
+| `.agents/plugins/` | The Codex marketplace manifest. |
 
 `AGENTS.md` is the portable payload. The hook sends it to every repository on the machine. A rule
 that applies only to this repository must go into `CLAUDE.md`, below the import. If you put such a
 rule into `AGENTS.md`, it goes to all other repositories, where it has no meaning.
 
-## Why a plugin
+## Why plugins
 
-Claude Code installs a plugin one time for each machine. The plugin then applies in every
-repository. This removes the manual copy.
+Claude Code and Codex install a plugin one time for each machine. The plugin then applies in every
+repository. This removes the manual copy and gives both agents the same skills and hooks.
+
+The agents use different manifest formats. Claude Code reads `.claude-plugin/plugin.json` and
+`.claude-plugin/marketplace.json`. Codex reads `.codex-plugin/plugin.json` and
+`.agents/plugins/marketplace.json`. Both plugins use the shared `skills/` and `hooks/` directories.
+Both manifests pin the plugin version. Bump the versions together for each release, because both
+agents cache installed plugins by version. The tests check that the versions stay equal.
 
 A plugin cannot supply a `CLAUDE.md`. It can supply a `SessionStart` hook. The hook returns the
 rules as `additionalContext`, and Claude Code puts this text into the context window. This is the
 only way for a plugin to give always-on rules.
 
-The repository root is the plugin, and the repository is also its own marketplace. Because of this,
-`${CLAUDE_PLUGIN_ROOT}` is the repository root, and the hook finds `AGENTS.md` at an exact path.
-The repository holds one plugin. If it must hold more than one plugin later, each plugin moves into
-`plugins/<name>/`, and the `source` in `marketplace.json` changes.
+The repository root is the plugin, and the repository is also its own marketplace. Both agents set
+`${CLAUDE_PLUGIN_ROOT}` for plugin hooks, so the hook finds `AGENTS.md` at an exact path. The
+repository holds one plugin. If it must hold more than one plugin later, each plugin moves into
+`plugins/<name>/`, and each marketplace source changes.
 
 ## Why a PreToolUse hook
 
-Instructions are context, not configuration. Claude Code does not enforce them. If the instructions
-of a repository disagree with the rules, the result is not certain.
+Instructions are context, not configuration. The agents do not enforce them. If the instructions of
+a repository disagree with the rules, the result is not certain.
 
 The order of the files does not solve this. Claude Code loads the file of the repository after the
 global file, and Codex does the same. The file that is closer to the working directory comes later,
@@ -51,18 +60,20 @@ and later text has more weight. This is the opposite of what we want.
 
 Two things reduce the risk:
 
-1. `AGENTS.md` starts with a statement that the rules govern. This is an explicit instruction, and
-   it is stronger than the position of the text. It works for Claude Code and for Codex.
+1. `AGENTS.md` starts with a statement that the rules govern. This makes the intended precedence
+   explicit, but it is still an instruction and not a mechanical guarantee.
 2. `hooks/enforce-rules.sh` is a `PreToolUse` hook. It returns `deny` or `ask`. This is a real
-   block. No instruction of a repository can remove it. Codex has no equal mechanism.
+   block in both agents after the user enables and trusts the plugin hook.
 
 The hook blocks the installation of packages, and it escalates a commit and a push to the user.
+Rules that the hook does not cover remain instructions. A conflicting repository rule can still
+make their result less certain.
 
-The hook reads the text of the command, so it has limits. It splits a compound command at `;`, `&&`,
-`||`, and `|`, and it tests each part alone. It also removes the quotes of a shell invoker, so it
-sees the command inside `bash -c "..."`. It cannot see a command that is built at run time, as in
-`P=pip; $P install x`. Treat the hook as a guard against a violation by mistake, not as a security
-boundary.
+The hook reads the text of the command, so it has limits. It tokenizes simple shell commands,
+respects quoted text, checks each part of a compound command, and inspects commands inside shell
+invokers such as `bash -lc "..."`. It cannot see a command that is built at run time, as in
+`P=pip; $P install x`. It also does not parse command substitutions or commands hidden behind other
+programs. Treat the hook as a guard against a violation by mistake, not as a security boundary.
 
 If `jq` is absent, the hook uses `python3`. If both are absent, the hook allows the command, because
 it cannot read the input.
@@ -73,14 +84,18 @@ check gave a wrong result too often, so this rule stays a soft rule in `AGENTS.m
 
 ## Codex
 
-Codex has no plugin system. It reads `AGENTS.md` from fixed paths, so it needs a link:
+Codex reads the plugin from `.codex-plugin/plugin.json`. Its marketplace file is
+`.agents/plugins/marketplace.json`. Install both from this repository:
 
 ```
-ln -s ~/codelore/AGENTS.md ~/.codex/AGENTS.md
+codex plugin marketplace add anwai98/codelore
+codex plugin add codelore@codelore
 ```
 
-Codex does not support an import. For this reason `AGENTS.md` holds the full text, and `CLAUDE.md`
-only imports it. Do not turn this around.
+Codex does not support the `@AGENTS.md` import. The SessionStart hook gives it the global rules when
+the plugin is active. Codex also reads the root `AGENTS.md` when it works in this repository. For
+these reasons, `AGENTS.md` holds the full text, and `CLAUDE.md` only imports it. Do not turn this
+around.
 
 ## Cost
 

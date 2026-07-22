@@ -10,7 +10,11 @@ emit_with_jq() {
 }
 
 emit_with_python() {
-    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": open(sys.argv[1]).read()}}))' "$1"
+    python3 -c 'import json, sys
+with open(sys.argv[1]) as handle:
+    rules = handle.read()
+output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": rules}}
+print(json.dumps(output))' "$1"
 }
 
 main() {

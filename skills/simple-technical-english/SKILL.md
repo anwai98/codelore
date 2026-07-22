@@ -1,14 +1,14 @@
 ---
 name: simple-technical-english
-description: Write all prose in Simplified Technical English (ASD-STE100), adapted for code. Use whenever you write or edit code comments, docstrings, type/argument descriptions, error and log messages, CLI help text, README and documentation files, commit messages, PR descriptions, or any other explanatory text. Also use when asked to "simplify the wording", "clean up the docstrings", "make the comments clearer", or to review text for clarity.
+description: Write software prose in clear technical English. Use for comments, docstrings, messages, docs, or reviews.
 ---
 
 # Simplified Technical English for code
 
 Write every piece of prose so that a reader with limited English can understand it on the
-first reading. The standard is ASD-STE100 (Simplified Technical English): 53 writing rules
-and a restricted vocabulary, made for aircraft maintenance manuals. The rules below are
-that standard, adapted to code.
+first reading. This guidance draws on ASD-STE100 (Simplified Technical English), which was made for
+aircraft maintenance manuals. It is a practical subset adapted for software, not a statement of
+conformance with the full standard.
 
 Apply this to: docstrings, inline comments, error and warning messages, log messages,
 CLI `help=` strings, tooltips, README and docs, commit messages, PR descriptions.

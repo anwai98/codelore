@@ -1,0 +1,20 @@
+{
+  "name": "codelore",
+  "interface": {
+    "displayName": "Codelore"
+  },
+  "plugins": [
+    {
+      "name": "codelore",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -9,7 +9,9 @@ to `AGENTS.md`, not to `CLAUDE.md`.
 
 - `AGENTS.md`: the rules for git, the environment, testing, code quality, and code style.
 - `skills/simple-technical-english/`: a skill that writes all prose in Simplified Technical English.
-- `hooks/`: a `SessionStart` hook. It puts the rules into the context of every session.
+- `hooks/`: hooks that load the rules and guard commands that need approval or must not run.
+- `.claude-plugin/`: the Claude Code plugin and marketplace manifests.
+- `.codex-plugin/` and `.agents/`: the Codex plugin and marketplace manifests.
 
 ## Claude Code
 
@@ -28,12 +30,16 @@ skill must show as `/codelore:simple-technical-english`.
 
 ## Codex
 
-Codex has no plugin system. It reads `AGENTS.md` from fixed paths. Link this file into the Codex
-home directory one time on each device:
+The repository is also a Codex plugin and its own marketplace. Install it one time on each device:
 
 ```
-ln -s ~/codelore/AGENTS.md ~/.codex/AGENTS.md
+codex plugin marketplace add anwai98/codelore
+codex plugin add codelore@codelore
 ```
 
-Codex also reads an `AGENTS.md` in the root of each repository. A repository file is added to the
-global file, and the repository file has the higher priority.
+Start a new Codex session after the install. Open `/hooks`, review the Codelore hook definitions,
+and trust them. Codex skips plugin hooks until you complete this review.
+
+This gives you the skill, the rules, and the command guard in every repository on the device. Use
+`codex plugin list` to check the install. Use `/skills` and `/hooks` in a new session to check the
+loaded components.

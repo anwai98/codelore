@@ -1,0 +1,29 @@
+{
+  "name": "codelore",
+  "version": "0.1.0",
+  "description": "Shared coding-agent rules and Simplified Technical English guidance",
+  "author": {
+    "name": "Anwai Archit",
+    "url": "https://github.com/anwai98"
+  },
+  "homepage": "https://github.com/anwai98/codelore",
+  "repository": "https://github.com/anwai98/codelore",
+  "license": "MIT",
+  "keywords": [
+    "coding-agents",
+    "rules",
+    "technical-writing"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codelore",
+    "shortDescription": "Shared rules and technical writing guidance",
+    "longDescription": "Apply shared coding rules and Simplified Technical English guidance across repositories.",
+    "developerName": "Anwai Archit",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Apply my shared coding rules and writing guidance."
+    ]
+  }
+}
