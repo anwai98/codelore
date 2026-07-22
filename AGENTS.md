@@ -8,6 +8,7 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 ## Git
 
 - Never run `git commit` or `git push` without explicit permission from the user.
+- When Codex creates a commit, append `Co-authored-by: codex <codex@openai.com>` as a commit trailer after a blank line. Omit it only when the user explicitly requests sole authorship or no Codex attribution.
 
 ## Environment
 
