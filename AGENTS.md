@@ -21,8 +21,7 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 
 ## Compatibility
 
-- Do not add backward compatibility when you add a feature. Write only the new form.
-- Do not keep an old name, an alias, a deprecation warning, or a fallback path for old callers. Change every call site instead.
+- Do not add backward compatibility when you add a feature. Write only the new form. Do not keep an old name, an alias, a deprecation warning, or a fallback path for old callers. Change every call site instead.
 - Keep backward compatibility only when the user asks for it.
 
 ## Code quality
@@ -34,14 +33,38 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 ## Code style
 
 - Keep code comments minimalistic: a comment should state what is needed and no more, not narrate a story. Prefer one short line explaining the non-obvious "why". Avoid multi-sentence explanations, background, alternatives considered, or restating what the code already says. If a comment runs to several lines, it is almost always too long - cut it down.
-- No heavy section separator comments like `# ---------------------------------------------------------------------------`.
-- No inline section labels like `# -- encoder --`.
-- No excessive space-padding anywhere for visual column alignment: inline comments, docstring argument lists, dict entries, tuple/list elements, etc. Use single spaces throughout. Write `x = foo(x)  # (B, N, D)`, not `x = foo(x)     # (B, N, D)`; write `"key": value`, not `"key":    value`; write `x: (B, C, H, W)`, not `x:          (B, C, H, W)`.
+- No section markers in code: no heavy separator line like `# ---------------------------------------------------------------------------`, and no inline label like `# -- encoder --`.
+- No excessive space-padding anywhere for visual column alignment: inline comments, docstring argument lists, dict entries, tuple/list elements, printed and logged output, etc. Use single spaces throughout, and always exactly one space after a colon. Write `x = foo(x)  # (B, N, D)`, not `x = foo(x)     # (B, N, D)`; write `"key": value`, not `"key":    value`; write `x: (B, C, H, W)`, not `x:          (B, C, H, W)`; write `print(f"Cosine Similarity: {cos_sim:.6f}")`, not `print(f"Cosine Similarity:   {cos_sim:.6f}")`. You break this rule most often when you write several labels one after another. Read back every block of labels, and delete the padding.
 - Never use the Unicode arrow `→`. Use `->` instead.
 - Never use the em dash `—`. Use `-` instead.
 - No double spaces after punctuation in prose (docstrings, comments, strings): write `CVPR 2026. https://...`, not `CVPR 2026.  https://...`.
 - Never name module-level variables with a leading underscore.
 - Don't embed leading whitespace in string literals for output indentation: write `print(f"Key: {value}")`, not `print(f"  Key: {value}")`.
+- Organize the imports of a file into blocks that one blank line separates. The blocks come in this order: the standard library, the scientific utilities, the GUI packages, `torch`, the packages that the user develops, and the current project. Give every package of the user its own block. Order these blocks from the most general package to the most specific one: `elf`, then `torch_em`, then `micro_sam`. A package that contributes more than one import line also gets its own block. Inside a block, put the shortest line first and the longest line last:
+  ```python
+  import os
+  import math
+  import argparse
+
+  import numpy as np
+  import pandas as pd
+  import matplotlib.pyplot as plt
+
+  import napari
+  from qtpy import QtWidgets
+
+  import torch
+  import torch.nn.functional as F
+
+  from elf.evaluation import dice_score
+
+  from torch_em.data import MinInstanceSampler
+
+  from micro_sam.training import train_sam
+
+  from stable_embeddings.loss import masked_mse_loss
+  from stable_embeddings.rotation import apply_geometric_rotation
+  ```
 - Always structure scripts with functions: put all logic in named functions, call them from `main()`, and guard execution with `if __name__ == "__main__": main()`.
 - Never align continuation lines to the opening parenthesis. Always try to fit a call on one line first. Only wrap if it exceeds 120 chars. If it must wrap, use a single extra indent level with the closing paren on its own line:
   ```python
@@ -57,4 +80,4 @@ If an instruction of the repository disagrees with a rule below, the rule below 
   x = (a + b
        + c + d)
   ```
-- This applies to `argparse` `add_argument` calls too. Always try the one-liner first: `parser.add_argument("--foo", default=x, help="...")`. Only expand to multiple lines if it does not fit in 120 chars. Never align continuation lines to the `add_argument(` opening paren.
+- This applies to `argparse` too. Write `parser.add_argument("--foo", default=x, help="...")` on one line.
