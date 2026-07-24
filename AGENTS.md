@@ -27,6 +27,7 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 ## Code quality
 
 - Always run `flake8 --max-line-length=120` on any code you add before considering the task done.
+- Use flake8 as the only linter. Do not run ruff, black, isort, or any other linter or formatter. Do not run them even to check, because some reformat files on a check run. Fix every issue by hand.
 - Never modify `__init__.py` files unless explicitly asked to.
 - When adding a `# noqa` comment, never include the error type: write `# noqa`, not `# noqa: E402`.
 
