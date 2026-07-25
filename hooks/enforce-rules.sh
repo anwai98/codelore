@@ -20,6 +20,8 @@ PYTHON_SAFE_PREVIEW=0
 PIP_REASON="The environment is managed by the user. Do not install packages with pip."
 CONDA_REASON="The environment is managed by the user. Do not install packages with conda or micromamba."
 UV_REASON="The environment is managed by the user. Do not install packages with uv."
+FORMATTER_REASON="A formatter rewrites files. Use flake8 and fix every issue by hand. A read-only run\
+ such as \`black --check\` is allowed."
 
 json_field() {
     local input=$1 field=$2
@@ -430,16 +432,27 @@ find_python_module() {
 }
 
 inspect_python() {
-    local pip_args
+    local module_args
     find_python_module "$@"
     [ "$PYTHON_SAFE_PREVIEW" -eq 0 ] || return
-    [ "$PYTHON_MODULE" = "pip" ] || return
+    [ -n "$PYTHON_MODULE" ] || return
     [ "$PYTHON_MODULE_INDEX" -lt "$#" ] || return
-    pip_args=("${@:$((PYTHON_MODULE_INDEX + 1))}")
-    find_subcommand pip "${pip_args[@]}"
-    if ! is_safe_preview pip "${pip_args[@]}" && [ "$SUBCOMMAND" = "install" ]; then
-        set_decision deny "$PIP_REASON"
-    fi
+    module_args=("${@:$((PYTHON_MODULE_INDEX + 1))}")
+
+    case "$PYTHON_MODULE" in
+        pip)
+            find_subcommand pip "${module_args[@]}"
+            if ! is_safe_preview pip "${module_args[@]}" && [ "$SUBCOMMAND" = "install" ]; then
+                set_decision deny "$PIP_REASON"
+            fi
+            ;;
+        black|isort)
+            inspect_formatter "$PYTHON_MODULE" "${module_args[@]}"
+            ;;
+        ruff)
+            inspect_ruff "${module_args[@]}"
+            ;;
+    esac
 }
 
 option_takes_value() {
@@ -463,7 +476,7 @@ option_takes_value() {
         uv:--directory|uv:--project|uv:--config-file|uv:--color|uv:--python|uv:--python-preference)
             return 0
             ;;
-        uv:--with|uv:--with-requirements|uv:--extra|uv:--env-file)
+        uv:--with|uv:--with-requirements|uv:--extra|uv:--env-file|uv:--from)
             return 0
             ;;
         git-commit:-m|git-commit:--message|git-commit:-F|git-commit:--file|git-commit:--author)
@@ -514,7 +527,68 @@ option_takes_value() {
         conda-upgrade:--channel|conda-upgrade:--file)
             return 0
             ;;
+        black:-l|black:--line-length|black:-t|black:--target-version|black:--include|black:--exclude)
+            return 0
+            ;;
+        black:--extend-exclude|black:--force-exclude|black:--stdin-filename|black:-W|black:--workers)
+            return 0
+            ;;
+        black:--config|black:--required-version)
+            return 0
+            ;;
+        isort:--sp|isort:--settings-path|isort:--settings-file|isort:--settings|isort:--profile)
+            return 0
+            ;;
+        isort:-l|isort:--line-length|isort:-w|isort:--line-width|isort:-m|isort:--multi-line)
+            return 0
+            ;;
+        isort:-p|isort:--project|isort:--src|isort:--src-path|isort:-s|isort:--skip|isort:--skip-glob)
+            return 0
+            ;;
+        isort:--extend-skip|isort:-o|isort:--thirdparty|isort:--known-first-party)
+            return 0
+            ;;
+        ruff:--config|ruff-check:--config|ruff-format:--config)
+            return 0
+            ;;
+        ruff-check:--select|ruff-check:--ignore|ruff-check:--extend-select|ruff-check:--per-file-ignores)
+            return 0
+            ;;
+        ruff-check:--exclude|ruff-check:--extend-exclude|ruff-check:--output-format|ruff-check:--cache-dir)
+            return 0
+            ;;
+        ruff-check:--target-version|ruff-check:--line-length|ruff-check:--stdin-filename)
+            return 0
+            ;;
+        ruff-format:--exclude|ruff-format:--extend-exclude|ruff-format:--cache-dir|ruff-format:--range)
+            return 0
+            ;;
+        ruff-format:--target-version|ruff-format:--line-length|ruff-format:--stdin-filename)
+            return 0
+            ;;
     esac
+    return 1
+}
+
+# An option counts only in an option position. In `black --exclude --check .` the flag is the value
+# of --exclude, so the command still rewrites files. The wanted options are separated by a bar.
+has_option() {
+    local kind=$1 wanted=$2 args count i word
+    shift 2
+    args=("$@")
+    count=${#args[@]}
+
+    for ((i = 0; i < count; i++)); do
+        word=${args[$i]}
+        [ "$word" = "--" ] && return 1
+        [[ "$word" = -* ]] || continue
+        case "|$wanted|" in
+            *"|$word|"*)
+                return 0
+                ;;
+        esac
+        option_takes_value "$kind" "$word" && i=$((i + 1))
+    done
     return 1
 }
 
@@ -600,9 +674,16 @@ inspect_uv() {
         tool)
             nested=("${args[@]:$((index + 1))}")
             find_subcommand uv "${nested[@]}"
-            if ! is_safe_preview uv "${nested[@]}" && [ "$SUBCOMMAND" = "install" ]; then
-                set_decision deny "$UV_REASON"
-            fi
+            is_safe_preview uv "${nested[@]}" && return
+            case "$SUBCOMMAND" in
+                install)
+                    set_decision deny "$UV_REASON"
+                    ;;
+                run)
+                    [ $((SUBCOMMAND_INDEX + 1)) -lt "${#nested[@]}" ] || return
+                    inspect_runner uv "${nested[@]:$((SUBCOMMAND_INDEX + 1))}"
+                    ;;
+            esac
             ;;
         run)
             inspect_runner uv "${args[@]:$((index + 1))}"
@@ -646,6 +727,57 @@ inspect_conda() {
             ;;
         run)
             inspect_runner conda "${args[@]:$((index + 1))}"
+            ;;
+    esac
+}
+
+# black and isort rewrite the files they read. Only the read-only forms stay allowed.
+inspect_formatter() {
+    local kind=$1 read_only=
+    shift
+    case "$kind" in
+        black)
+            read_only="--check|--diff|--version"
+            ;;
+        isort)
+            read_only="--check-only|--check|-c|--diff|-d|--version"
+            ;;
+    esac
+    is_safe_preview "$kind" "$@" && return
+    has_option "$kind" "$read_only" "$@" && return
+    set_decision deny "$FORMATTER_REASON"
+}
+
+# `ruff format` writes unless it checks, and `ruff check` writes only with a fix flag. Both
+# subcommands default to the current directory, so a bare `ruff format` rewrites the whole tree.
+inspect_ruff() {
+    local args=("$@") nested count index
+    count=${#args[@]}
+    find_subcommand ruff "${args[@]}"
+    index=$SUBCOMMAND_INDEX
+    [ "$index" -ge 0 ] || return
+    if [ "$index" -gt 0 ]; then
+        nested=("${args[@]:0:$index}")
+        is_safe_preview ruff "${nested[@]}" && return
+    fi
+
+    nested=()
+    [ $((index + 1)) -lt "$count" ] && nested=("${args[@]:$((index + 1))}")
+
+    case "$SUBCOMMAND" in
+        format)
+            if [ "${#nested[@]}" -gt 0 ]; then
+                is_safe_preview ruff-format "${nested[@]}" && return
+                has_option ruff-format "--check|--diff|--version" "${nested[@]}" && return
+            fi
+            set_decision deny "$FORMATTER_REASON"
+            ;;
+        check)
+            [ "${#nested[@]}" -gt 0 ] || return
+            is_safe_preview ruff-check "${nested[@]}" && return
+            if has_option ruff-check "--fix|--fix-only" "${nested[@]}"; then
+                set_decision deny "$FORMATTER_REASON"
+            fi
             ;;
     esac
 }
@@ -755,6 +887,15 @@ inspect_simple_command() {
             ;;
         uv)
             inspect_uv "${args[@]}"
+            ;;
+        uvx)
+            inspect_runner uv "${args[@]}"
+            ;;
+        black|isort)
+            inspect_formatter "$executable" "${args[@]}"
+            ;;
+        ruff)
+            inspect_ruff "${args[@]}"
             ;;
         micromamba|mamba|conda)
             inspect_conda "${args[@]}"

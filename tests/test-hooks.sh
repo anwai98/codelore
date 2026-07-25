@@ -206,6 +206,69 @@ test_runner_commands_are_inspected() {
     expect_decision "micromamba run -n super flake8 --max-line-length=120 ." allow
 }
 
+test_formatter_writes_are_denied() {
+    expect_decision "black ." deny
+    expect_decision "black src/module.py" deny
+    expect_decision "isort ." deny
+    expect_decision "ruff format" deny
+    expect_decision "ruff format ." deny
+    expect_decision "ruff check --fix ." deny
+    expect_decision "ruff check --fix-only ." deny
+    expect_decision "python -m black ." deny
+    expect_decision "python -m isort ." deny
+    expect_decision "python -m ruff format ." deny
+    expect_decision "/usr/bin/black ." deny
+    expect_decision "X=1 isort ." deny
+    expect_decision "micromamba run -n super black ." deny
+    expect_decision "uv run ruff format ." deny
+    expect_decision "uvx black ." deny
+    expect_decision "uvx ruff format ." deny
+    expect_decision "uvx --from black black ." deny
+    expect_decision "uv tool run isort ." deny
+    expect_decision "uv tool run pip install torch" deny
+    expect_decision "bash -c 'black .'" deny
+    expect_decision "du -h && black ." deny
+    expect_decision "black ." deny codex
+}
+
+test_read_only_formatter_runs_are_allowed() {
+    expect_decision "black --check ." allow
+    expect_decision "black --diff ." allow
+    expect_decision "isort --check-only ." allow
+    expect_decision "isort -c ." allow
+    expect_decision "isort --diff ." allow
+    expect_decision "ruff check" allow
+    expect_decision "ruff check ." allow
+    expect_decision "ruff check --statistics ." allow
+    expect_decision "ruff format --check ." allow
+    expect_decision "ruff format --diff ." allow
+    expect_decision "ruff rule E501" allow
+    expect_decision "black --help" allow
+    expect_decision "black --version" allow
+    expect_decision "ruff --version" allow
+    expect_decision "black" allow
+    expect_decision "isort" allow
+    expect_decision "ruff" allow
+    expect_decision "ruff format --help" allow
+    expect_decision "micromamba run -n super black --check ." allow
+    expect_decision "uvx black --check ." allow
+    expect_decision "uv tool run ruff format --check ." allow
+    expect_decision "uv tool install ruff --help" allow
+    expect_decision "uvx" allow
+    expect_decision "uv tool run" allow
+    expect_decision "flake8 --max-line-length=120 ." allow
+    expect_decision "echo black ." allow
+}
+
+# A read-only flag counts only in an option position. `--check` is the value of `--exclude` here.
+test_formatter_flags_only_count_as_options() {
+    expect_decision "black --exclude --check ." deny
+    expect_decision "black --line-length --diff ." deny
+    expect_decision "isort --profile --check-only ." deny
+    expect_decision "ruff format --config --check ." deny
+    expect_decision "ruff check --select --fix ." allow
+}
+
 test_shell_invoker_is_inspected() {
     expect_decision "bash -c 'pip install torch'" deny
     expect_decision "sh -c \"micromamba install numpy\"" deny
@@ -469,6 +532,9 @@ main() {
     test_heredoc_bodies_are_not_commands
     test_compound_commands_cannot_hide_a_violation
     test_runner_commands_are_inspected
+    test_formatter_writes_are_denied
+    test_read_only_formatter_runs_are_allowed
+    test_formatter_flags_only_count_as_options
     test_shell_invoker_is_inspected
     test_enforcement_survives_without_jq
     test_allowed

@@ -82,11 +82,21 @@ in the attached form `-mpip` and inside a bundle of short options such as `-um p
 hook does not cover remain instructions. A conflicting repository rule can still make their result
 less certain.
 
+The hook also blocks a formatter that rewrites files. It denies `black`, `isort`, `ruff format`, and
+`ruff check --fix`. It allows the read-only forms, such as `black --check`, `isort --check-only`,
+`ruff check`, and `ruff format --diff`. A read-only flag counts only in an option position, as a
+preview flag does, because `black --exclude --check .` still rewrites files. The hook finds these
+commands after a runner, after `python -m`, and after `uvx` or `uv tool run`. It does not block a wrapper such as `make lint` or
+`pre-commit run`, because it cannot see which tool the wrapper calls. That part of the rule stays an
+instruction. The hook blocks these three tools only. A linter for another language, a type checker,
+and a manifest validator stay allowed, because `AGENTS.md` restricts the style linters and the
+formatters of Python and nothing else.
+
 The hook reads the text of the command, so it has limits. It tokenizes simple shell commands,
 respects quoted text, ignores heredoc bodies, checks each part of a compound command, and skips
 assignment and redirection prefixes before finding the executable. It inspects commands inside
 shell invokers such as `bash -lc "..."` and inside runners such as
-`micromamba run -n super ...`. It lists the options that take a value for each runner, so it can
+`micromamba run -n super ...`, `uv run ...`, `uv tool run ...`, and `uvx ...`. It lists the options that take a value for each runner, so it can
 find the nested command. An unknown option that takes a value shifts this position and hides the
 nested command. Preview flags are checked after resolving a nested command. A `--help` or a
 `--dry-run` counts only in an option position, so `git commit -m --help` stays a real commit. The
