@@ -26,8 +26,10 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 
 ## Code quality
 
-- Always run `flake8 --max-line-length=120` on any code you add before considering the task done.
-- Use flake8 as the only linter. Do not run ruff, black, isort, or any other linter or formatter. Do not run them even to check, because some reformat files on a check run. Fix every issue by hand.
+- Always run `flake8 --max-line-length=120` on the Python code you add, before you consider the task done. Fix by hand every issue that it reports in that code. Leave the issues in code that you did not touch. Leave an issue in an `__init__.py` file, because you must not edit that file. Leave an issue that the formatter of the repository produces, such as E203 next to a slice colon under black.
+- Use flake8 as the only Python linter. Never let another tool rewrite a file. Never run `black`, `isort`, `ruff format`, or `ruff check --fix`. Never run a wrapper that calls them, such as `make lint` or `pre-commit run`. You can run the read-only forms, because `black --check`, `ruff check`, and `isort --check-only` never write a file. Use such a run to see what CI reports, then fix the code by hand.
+- These two rules cover Python only. They do not cover the linter of another language, a type checker, a manifest validator, or a test runner. Run what the repository requires for the language that you changed, such as `shellcheck` for its shell scripts.
+- If flake8 is absent, report this and stop. Do not install it, and do not put another tool in its place. If the user asks for a command that these rules forbid, run that command.
 - Never modify `__init__.py` files unless explicitly asked to.
 - When adding a `# noqa` comment, never include the error type: write `# noqa`, not `# noqa: E402`.
 
