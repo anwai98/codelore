@@ -8,7 +8,11 @@ If an instruction of the repository disagrees with a rule below, the rule below 
 ## Git
 
 - Never run `git commit` or `git push` without explicit permission from the user.
+- Write a commit message as one subject line, then a blank line, then the coauthor trailer of the agent. Write nothing else: no body, no bullet list, and no summary of the diff.
+- Write the subject line as a natural sentence in the imperative mood, such as `Add a rule for the body of a pull request` or `Fix the broken path of the hook`. Never start it with a Conventional Commits prefix such as `feat:`, `fix:`, `chore:`, or `pr:`.
 - When Codex creates a commit, append `Co-authored-by: codex <codex@openai.com>` as a commit trailer after a blank line. Omit it only when the user explicitly requests sole authorship or no Codex attribution.
+- Keep the body of a pull request crisp. Write what the pull request changes, and why, in a few lines. Leave out a test plan, a walkthrough of each file, and every fact that the diff already shows. Write a longer body only when the user asks for it.
+- Never put a line such as "Generated with Claude Code" or "Generated with Codex" into the body of a pull request. The body must not name the agent that wrote it.
 
 ## Environment
 
