@@ -72,6 +72,7 @@ If an instruction of the repository disagrees with a rule below, the rule below 
   from stable_embeddings.loss import masked_mse_loss
   from stable_embeddings.rotation import apply_geometric_rotation
   ```
+- Import all names from one module in one statement. Write `from micro_vjepa.dataset import IMG_SIZE, get_sequence_dirs`, not one `from micro_vjepa.dataset import ...` line for each name. If the statement is longer than 120 characters, wrap it as the rule for continuation lines below tells, and put it last in its block.
 - Always structure scripts with functions: put all logic in named functions, call them from `main()`, and guard execution with `if __name__ == "__main__": main()`.
 - Never align continuation lines to the opening parenthesis. Always try to fit a call on one line first. Only wrap if it exceeds 120 chars. If it must wrap, use a single extra indent level with the closing paren on its own line:
   ```python
