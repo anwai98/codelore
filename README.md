@@ -2,16 +2,19 @@
 
 Shared rules and skills for coding agents. One repository, used by Claude Code and Codex.
 
-`AGENTS.md` is the single source of truth for the rules. `CLAUDE.md` only imports it. Add new rules
-to `AGENTS.md`, not to `CLAUDE.md`.
+`AGENTS.md` is the single source of truth for the rules. `.claude/CLAUDE.md` only imports it. Add
+new rules to `AGENTS.md`, not to `.claude/CLAUDE.md`.
 
 ## Contents
 
 - `AGENTS.md`: the rules for git, the environment, testing, code quality, and code style.
+- `.claude/CLAUDE.md`: imports `AGENTS.md` and adds the rules for work in this repository.
 - `skills/simple-technical-english/`: a skill that writes all prose in Simplified Technical English.
 - `hooks/`: hooks that load the rules and guard commands that need approval or must not run.
 - `.claude-plugin/`: the Claude Code plugin and marketplace manifests.
-- `.codex-plugin/` and `.agents/`: the Codex plugin and marketplace manifests.
+- `.codex-plugin/` and `.agents/plugins/`: the Codex plugin and marketplace manifests.
+- `tests/` and `.github/workflows/`: the tests and the CI.
+- `docs/design.md`: the reasons for the structure of the repository.
 
 ## Claude Code
 
@@ -23,7 +26,7 @@ The repository is a plugin and its own marketplace. Install it one time on each 
 /reload-plugins
 ```
 
-This gives you the skill and the rules in every repository on the device.
+This gives you the skill, the rules, and the command guard in every repository on the device.
 
 To check the install, run `/context` in a different repository. The rules must be present, and the
 skill must show as `/codelore:simple-technical-english`.

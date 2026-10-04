@@ -460,10 +460,10 @@ test_every_skill_is_well_formed() {
 }
 
 test_claude_md_only_imports_agents_md() {
-    if grep -qx '@AGENTS.md' "$ROOT/CLAUDE.md"; then
-        report pass "CLAUDE.md imports AGENTS.md"
+    if grep -qx '@../AGENTS.md' "$ROOT/.claude/CLAUDE.md"; then
+        report pass ".claude/CLAUDE.md imports AGENTS.md"
     else
-        report fail "CLAUDE.md imports AGENTS.md" "the @AGENTS.md import is missing"
+        report fail ".claude/CLAUDE.md imports AGENTS.md" "the @../AGENTS.md import is missing"
     fi
 }
 

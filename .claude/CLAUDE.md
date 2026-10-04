@@ -1,4 +1,4 @@
-@AGENTS.md
+@../AGENTS.md
 
 ## Working in this repository
 
@@ -10,5 +10,5 @@ portable. Do not put a rule that applies only to this repository into `AGENTS.md
 - Add a skill as `skills/<name>/SKILL.md`. The `name` in the frontmatter must be the same as the
   name of the directory.
 - Keep the `description` of a skill to one sentence that tells what it does, and one sentence that
-  tells when to use it. Each skill adds about 150 tokens to every session.
+  tells when to use it. Each skill adds about 50 tokens to every session.
 - See `docs/design.md` for the reason behind this structure.

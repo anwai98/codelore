@@ -1,7 +1,7 @@
 {
   "name": "codelore",
   "description": "Shared coding-agent rules and the Simplified Technical English skill",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": {
     "name": "Anwai Archit"
   },
